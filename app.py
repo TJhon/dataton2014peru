@@ -26,7 +26,7 @@ dep_peru, df_clean = load_data()
 df_clean['afect_hour'] = df_clean['numconexdom'] / df_clean['hours']
 df_clean['departamento'] = df_clean.departamento.str.title()
 
-st.title("Interrupciones de servicio de agua, Peru")
+st.title("Perú - SUNASS: Interrupciones de servicio de agua")
 
 # Filters
 empresas = df_clean.eps.unique()
