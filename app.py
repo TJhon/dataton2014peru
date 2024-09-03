@@ -10,7 +10,7 @@ data_csv = "./Interrupciones_sunass/data/sunnas_int.csv"
 @st.cache_data
 def load_data():
     df_shp = gpd.read_file(dep_path)
-    df_csv = pd.read_csv(data_csv)
+    df_csv = pd.read_csv(data_csv).query('departamento != "Callao"')
 
     return df_shp, df_csv
 
