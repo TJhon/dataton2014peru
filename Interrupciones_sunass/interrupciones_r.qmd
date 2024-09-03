@@ -1,0 +1,207 @@
+
+
+```{r, include=F}
+knitr::opts_chunk$set(
+  echo = F,
+  warning = F,
+  message = F
+)
+librarian::shelf(
+  tidyverse, lubridate, janitor, sf
+)
+theme_set(theme_minimal())
+```
+
+
+```{r}
+#| cache: true
+
+# Leer los datos desde la URL
+interrupciones <- read_csv("https://expresateperu.datosabiertos.gob.pe/sites/default/files/Interrupciones_Dataset.csv")
+
+# Convertir las columnas a minúsculas
+df <- interrupciones %>% 
+  janitor::clean_names()
+```
+
+
+
+```{r}
+df_clean <- df |> 
+  mutate(
+    inicio = paste(fechainicio, horainicio) |> ymd_hms(),
+    final = paste(fechafin, horafin) |> ymd_hms(),
+    total_time = as.integer(final - inicio),
+    camiones_sis =  replace_na(numcamionespuntos, 0),
+    year = year(inicio),
+    hours = total_time / 3600 |> as.numeric(),
+    days = hours / 24,
+    .keep = 'unused'
+  ) |> 
+  mutate(responsabilidad = case_when(
+    motivointerrupcion %in% c("BAJA PRODUCCIÓN EN PLANTA", "CAMBIO DE GRIFO CONTRA INCENDIO", 
+                              "CAMBIO DE VÁLVULA", "EJECUCIÓN DE EMPALME", "FUGA EN CONEXIÓN", 
+                              "LIMPIEZA Y DESINFECCIÓN DE RESERVORIO/CISTERNA", "LINEA DE ADUCCION",
+                              "LINEA DE CONDUCCION DE AGUA CRUDA", "LINEA DE CONDUCCION DE AGUA TRATADA",
+                              "MANTENIMIENTO DE REDES SECUNDARIAS", "PROBLEMAS EN COLECTORES", 
+                              "ROTURA DE LÍNEA DE IMPULSIÓN", "TRABAJOS DE MEJORAMIENTO/REHABILITACIÓN") ~ "Empresa",
+    motivointerrupcion == "ROTURA DE TUBERÍA POR TERCERO" ~ "Acciones de terceros",
+    TRUE ~ "Otros"
+  )) |> 
+  select(!c(idinterrupcion)) |> 
+  filter(tiposervicio == 'AGUA POTABLE') |> 
+  mutate(
+    across(where(is.character), stringr::str_to_title)
+  ) |> 
+  mutate(across(c(inicio, final), as.character))
+df_clean |> head() 
+```
+
+
+```{r}
+df_clean |> write_csv("./data/sunnas_int.csv")
+df_clean_shp <- 
+  df_clean |> 
+  mutate(across(where(is.character), PeruData::tidy_text)) |> 
+  right_join(PeruData::map_peru_depa, by = c("departamento" = "depa")) |> 
+  st_as_sf() 
+
+# df_clean_shp |> 
+#   sf::write_sf("./data/sunnas_int_clean.shp")
+PeruData::map_peru_depa |> write_sf("./data/dep_peru.shp")
+
+```
+
+
+```{r}
+df_clean |> 
+  count(year, tipointerrupcion, responsabilidad) |> 
+  ggplot() +
+  aes(year, n, fill = responsabilidad) +
+  geom_bar(stat = 'identity', position = 'dodge') +
+  labs(x = "Año", y = "Cantidad de interrupciones", fill = "Tipo de interrupción") +
+  facet_wrap(~tipointerrupcion)
+```
+
+
+
+
+```{r}
+df_clean |> 
+  count(year, tipointerrupcion) |> 
+  ggplot() +
+  aes(year, n, fill = tipointerrupcion) +
+  geom_bar(stat = 'identity', position = 'dodge') +
+  labs(x = "Año", y = "Cantidad de interrupciones", fill = "Tipo de interrupción")
+```
+
+```{r}
+df_clean %>% 
+  filter(year == 2024) |> 
+  group_by(departamento) %>%
+  summarise(total_duration = sum(hours)) %>%
+  ggplot(aes(x = fct_reorder(departamento, total_duration) , y = total_duration, fill = total_duration)) +
+  geom_col() +
+  labs(title = "Duración total de las interrupciones por departamento",
+       x = "Departamento", y = "Duración total (horas)") +
+  # theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  scale_fill_gradient(low = "lightblue", high = "red") +
+  coord_flip() 
+```
+
+
+```{r}
+df_clean %>% 
+  filter(hours > 0) |> 
+  group_by(departamento) %>%
+  summarise(total_duration = mean(hours)) %>%
+  ggplot(aes(x = fct_reorder(departamento, total_duration) , y = total_duration, fill = total_duration)) +
+  geom_col() +
+  labs(title = "Duración total de las interrupciones por departamento",
+       x = "Departamento", y = "Duración total (horas)") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  scale_fill_gradient(low = "lightblue", high = "red") +
+  coord_flip()
+```
+
+
+```{r}
+
+df_clean %>% 
+  mutate(prov_dep = paste(provincia, departamento, sep = " - ")) |> 
+  filter(hours > 0) |> 
+  group_by(prov_dep) %>%
+  summarise(total_duration = mean(hours)) %>%
+  arrange(desc(total_duration)) |> 
+  head(30) |> 
+  ggplot(aes(x = fct_reorder(prov_dep, total_duration) , y = total_duration, fill = total_duration)) +
+  geom_col() +
+  labs(title = "Duración total de las interrupciones por departamento",
+       x = "Departamento", y = "Duración total (horas)") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  scale_fill_gradient(low = "lightblue", high = "red") +
+  coord_flip()
+```
+
+
+
+```{r}
+
+df_clean %>%
+  count(tipointerrupcion, motivointerrupcion, sort = TRUE) %>%
+  ggplot(aes(x = reorder(motivointerrupcion, n), y = n)) +
+  geom_col(fill = "skyblue") +
+  coord_flip() +
+  facet_wrap(~tipointerrupcion, scales='free_x') +
+  labs(title = "Motivos más frecuentes de interrupción",
+       x = "Motivo de la interrupción", y = "Frecuencia") +
+  theme_minimal()
+```
+
+```{r}
+# Agrupar por año y tipo de interrupción para contar las interrupciones
+df_clean %>%
+  group_by(year = lubridate::year(inicio), tipointerrupcion) %>%
+  summarise(count = n()) %>%
+  ggplot(aes(x = year, y = count, color = tipointerrupcion)) +
+  geom_line(size = 1) +
+  labs(title = "Comparación de interrupciones por año",
+       x = "Año", y = "Cantidad de interrupciones", color = "Tipo de interrupción") +
+  theme_minimal()
+
+```
+
+```{r}
+df_clean %>%
+  group_by(year = year, tipointerrupcion) %>%
+  summarise(count = mean(hours)) %>%
+  ggplot(aes(x = year, y = count, color = tipointerrupcion)) +
+  geom_line(size = 1) +
+  labs(title = "Comparación de interrupciones por año",
+       x = "Año", y = "Cantidad de interrupciones", color = "Tipo de interrupción") +
+  theme_minimal()
+
+```
+
+
+
+
+
+```{r}
+df_clean_shp |> 
+  filter(total_time > 0) |> 
+  group_by(tiposervicio, tipointerrupcion, geometry) |> 
+  filter(year == 2023) |> 
+  summarise(mean_tiempo_h = mean(total_time) / 3600) |> 
+  ggplot() +
+  geom_sf() +
+  aes(fill = mean_tiempo_h) +
+  scale_fill_gradient(low = "lightblue", high = "red")  +
+  facet_wrap( ~ tipointerrupcion) +
+  theme_void()
+```
+
+
+
+
+

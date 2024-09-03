@@ -1,0 +1,172 @@
+---
+jupyter: python3
+---
+
+<!-- https://expresateperu.datosabiertos.gob.pe/dataset/registro-de-interrupciones-del-servicio-de-agua-y-alcantarillado-imprevistas-y-programadas-0#{view-graph:{graphOptions:{hooks:{processOffset:{},bindEvents:{}}}},graphOptions:{hooks:{processOffset:{},bindEvents:{}}},view-grid:{columnsWidth:[{column:!FECHAINICIO,width:137}]}} -->
+
+## Registro de interrupciones del servicio de agua y alcantarillado imprevistas y programadas reportadas por las empresas prestadoras a la Sunass
+
+El registro de interrupciones es una herramienta informática implementada por la Sunass para que las empresas prestadoras comuniquen al regulador la ocurrencia de las interrupciones programadas e imprevistas de los servicios de agua potable y alcantarillado. Se trata de un registro obligatorio, según lo establece el numeral 81.2 del artículo 81 del Texto Único Ordenado del Reglamento de Calidad de la Prestación de los Servicios de Saneamiento (TUO del RCPSS) (DS Nº 058-2023-SUNASS-CD).
+
+Este registro se ha ido consolidando desde su creación, incrementándose anualmente el número de interrupciones registradas, a medida que las empresas prestadoras han venido tomando conciencia de la importancia de este reporte.
+
+El contenido mínimo de la comunicación a la Sunass está en el DS Nº 058-2023-SUNASS-CD.
+
+El registro de interrupciones muestra:
+
+Nombre de la empresa prestadora
+Ubicación de la interrupción registrada (departamento, provincia y distrito)
+Número de conexiones domiciliarias y unidades de uso afectados por la interrupción registrada.
+Número de camiones cisterna o puntos de abastecimiento provisional empleados durante la interrupción registrada.
+
+```{python}
+import pandas as pd, numpy as np
+```
+
+```{python}
+
+
+interrupciones = pd.read_csv("https://expresateperu.datosabiertos.gob.pe/sites/default/files/Interrupciones_Dataset.csv")
+interrupciones.head()
+```
+
+```{python}
+# interrupciones.columns
+
+df = interrupciones.copy()
+df.columns = [col.lower() for col in df.columns]
+
+
+def to_timestamp(col_date, col_hour, data = df, format_col = '%Y%m%d', format_hour = '%H:%M'):
+
+    data[col_date] = pd.to_datetime(data[col_date], format = format_col)
+    data[col_hour] = pd.to_datetime(data[col_hour], format = format_hour).dt.time
+    return pd.to_datetime(data[col_date].dt.date.astype(str) + ' ' + data[col_hour].astype(str))
+
+df['fin'] = to_timestamp('fechafin', 'horafin')
+df['inicio'] = to_timestamp('fechainicio', 'horainicio') 
+df['total_time'] = df['fin'] - df['inicio']
+df['total_secs'] = (df.total_time).dt.total_seconds()
+df['total_h'] = df['total_secs'] / 3600
+df['year_inicio'] = df.inicio.dt.year
+
+# Normalizando 
+
+def norm_col(col, data = df, q = 0.999):
+
+    max_ = np.quantile(data[col], q)
+    return np.where(data[col]> max_h, max_h, data[col])
+
+df['total_h_n'] = norm_col('total_h')
+df['numconexdom_n'] = norm_col('numconexdom')
+df['unidadesuso_n'] = norm_col('unidadesuso')
+
+# interrupcion
+df = df.drop(columns=[
+    'fechainicio', 'horainicio', 'fechafin', 'horafin',
+    'idinterrupcion', 'motivointerrupcion'
+    ]).query('total_secs > 0')
+
+fill_aff = {'numconexdom': 0, 'unidadesuso': 0, 'numcamionespuntos': 0}
+
+df.fillna(value=fill_aff, inplace=True)
+
+df = df.sort_values('total_time', ascending=True).query('numconexdom > 0')
+df.head(2)
+```
+
+```{python}
+df.sort_values('unidadesuso')
+```
+
+# Descriptivo
+
+## Frecuencia de interrupciones
+
+[x] Empresa Con Mayor frecuencia de interrupciones
+[x] Que tipo de interrupcion es mas comun
+[x] Zonas geograficas ocurren mas interrupciones
+
+## Duracion
+
+[] Cual es la ducacion promedio de una interrupcion
+[] Diferencia entre ducacion de interrupciones, entre programadas e imprevistas
+
+## Impacto
+
+[] Promedio de conexciones y unidades de uso afectadas por interrupciones
+[] Relacion entre la duracion de interrupcion y el numero de conexciones/.unidades afectadas
+[] Varia el impacto segun el tipo de servicio
+
+# Comparativo
+
+[] Duracion de las interrupciones y las empresas prestadoras
+[] Evolucion de la frecuencias de interrupciones, patrones estacionales?
+[] Duracion de la interrupcion y el numero de camiones cistena utilizados
+
+```{python}
+# env
+
+eps = 'eps'
+tipo_int = 'tipointerrupcion'
+tipo_ser = 'tiposervicio'
+n_conex = 'numconexdom'
+n_unidad = 'unidadesuso'
+camiones = 'numcamionespuntos'
+year = 'year_inicio'
+dist = ['departamento', 'provincia', 'distrito']
+```
+
+```{python}
+# Empresa Con Mayor frecuencia de interrupciones por anios
+_n_top = 5
+freq_int = df.groupby([year, eps, tipo_int]).size().reset_index(name = "n").sort_values([year, 'n'], ascending = False)
+freq_int_eps=freq_int.groupby([year, tipo_int]).head(_n_top)
+```
+
+```{python}
+# Que tipo de interrupcion es mas comun
+df1 = df.groupby([year, tipo_int]).size().reset_index(name = 'n')
+
+relacion_tipo = df1.pivot(index='year_inicio', columns='tipointerrupcion', values='n').reset_index()
+
+# Calcular la relación entre interrupciones imprevistas y programadas
+relacion_tipo['relacion'] = relacion_tipo['IMPREVISTA'] / relacion_tipo['PROGRAMADA']
+relacion_tipo
+```
+
+```{python}
+zonas_int = df.groupby([year] + dist).size().reset_index(name = 'n').sort_values([year, 'n'], ascending = False)
+zonas_int.head(3)
+```
+
+```{python}
+import matplotlib.pyplot as plt
+```
+
+```{python}
+df.head()
+```
+
+```{python}
+plt.scatter("total_h", "numconexdom", data = df)
+```
+
+```{python}
+
+plt.scatter(df['numconexdom'], df['total_h_n'])
+```
+
+```{python}
+df['year_inicio'].unique()
+```
+
+```{python}
+df.head()
+```
+
+
+```{python}
+df['eps'].unique()
+```
+
