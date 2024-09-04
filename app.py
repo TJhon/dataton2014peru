@@ -90,7 +90,7 @@ def plt_historical(
 
 st.header("Series históricas")
 plt_historical()
-plt_historical("Camiones Cistenas Desplegados", col = 'camiones_sis')
+plt_historical("Camiones Cisternas Desplegados", col = 'camiones_sis')
 
 
 
